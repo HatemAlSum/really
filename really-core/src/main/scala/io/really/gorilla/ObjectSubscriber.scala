@@ -10,6 +10,7 @@ import io.really.gorilla.GorillaEventCenter.ReplayerSubscribed
 import io.really.gorilla.SubscriptionManager.{ UpdateSubscriptionFields, Unsubscribe }
 import io.really.ReallyGlobals
 import io.really.model.FieldKey
+import io.really.model.persistent.ModelRegistry
 import io.really.model.persistent.ModelRegistry.CollectionActorMessage.GetModel
 import io.really.model.persistent.ModelRegistry.ModelResult
 import io.really.model.persistent.ModelRegistry.ModelResult.ModelFetchError
@@ -36,7 +37,7 @@ class ObjectSubscriber(rSubscription: RSubscription, globals: ReallyGlobals) ext
 
   def subscriptionFailed(errorCode: Int, reason: String) = {
     log.error(s"$logTag is going to die since the subscription failed because of: $reason\n error code: $errorCode")
-    rSubscription.requestDelegate ! SubscriptionFailureWrites.writes(SubscriptionFailure(r, errorCode, reason))
+    rSubscription.pushChannel ! SubscriptionFailureWrites.writes(SubscriptionFailure(r, errorCode, "Internal Server Error"))
     context.stop(self)
   }
 
@@ -115,15 +116,11 @@ class ObjectSubscriber(rSubscription: RSubscription, globals: ReallyGlobals) ext
       } else {
         fields = fields union Set(newFields.toSeq: _*)
       }
-    case ModelUpdatedEvent(_, newModel) =>
+    case ModelRegistry.ModelOperation.ModelUpdated(_, newModel, _) =>
       log.debug(s"$logTag received a ModelUpdated message for: $r")
       context.become(withModel(newModel) orElse commonHandler)
-    case ModelDeletedEvent(deletedR) =>
-      if (deletedR == r) {
-        rSubscription.requestDelegate ! SubscriptionFailure(r, 501, s"received a DeletedModel message for: $r")
-        context.stop(self)
-      }
-
+    case ModelRegistry.ModelOperation.ModelDeleted(deletedR) if deletedR == r.skeleton =>
+      rSubscription.requestDelegate ! SubscriptionFailure(r, 501, s"received a DeletedModel message for: $r")
+      context.stop(self)
   }
-
 }
